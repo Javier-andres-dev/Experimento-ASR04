@@ -1,0 +1,108 @@
+version: '3.8'
+services:
+
+  db_inventary:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admindb
+      POSTGRES_DB: dbinventary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5433:5432"
+    restart: always
+    volumes:
+      - pgdata_inventary:/var/lib/postgresql/data    
+    networks:
+      - inventary_net
+
+  rabbitmq_broker:
+    image: rabbitmq:3-management
+    container_name: rabbitmq_broker
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    
+    networks:
+      - inventary_net
+
+  ingest-service:
+    build: 
+        context : ./ingest-service
+        dockerfile : Dockerfile
+    container_name: ingest_service
+    ports:
+      - "3001:3001"
+      - "8000:8000"
+    environment:
+      RABBITMQ_HOST: rabbitmq_broker
+      QUEUE_NAME: product_queue
+
+    restart: always
+    networks:
+      - inventary_net
+    depends_on:
+      - db_inventary
+      - rabbitmq_broker
+
+
+
+  inventary-service:
+    build: 
+        context : ./Inventary-service
+        dockerfile : Dockerfile
+    container_name: inventary-service
+    ports:
+      - "8001:8001"
+    environment:
+      DB_USER : postgres
+      DB_PASSWORD : admindb
+      DB_NAME : dbinventary
+      DB_HOST : db_inventary
+      DB_PORT : 5432
+      RABBITMQ_HOST: rabbitmq_broker
+      QUEUE_NAME: product_queue
+
+    restart: always
+    networks:
+      - inventary_net
+
+    depends_on:
+       db_inventary:
+        condition: service_healthy
+
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - inventary_net
+      
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+
+
+networks:
+  inventary_net:
+    name: inventary_net  # Esto fuerza el nombre de la red
+    driver: bridge
+
+
+volumes:
+  pgdata_inventary:
