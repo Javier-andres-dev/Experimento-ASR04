@@ -1,0 +1,255 @@
+# Ingest-service _________________________________________________________________________________________________________________
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingest
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingest
+  template:
+    metadata:
+      labels:
+        app: ingest
+    spec:
+      containers:
+        - name: ingest
+          image: us-central1-docker.pkg.dev/devpros/devpros-exp/ingest-service:v8
+          ports:
+            - containerPort: 3001
+          resources:
+            requests:
+              cpu: "500m"  # ⬇️ Reducimos recursos de Ingest para evitar sobrecarga
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          env:
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-service-deploy"
+            - name: RABBITMQ_USER
+              value: "admin"
+            - name: RABBITMQ_PASSWORD
+              value: "admin"
+            - name: QUEUE_NAME
+              value: "product_queue"
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingest-deploy
+  annotations : 
+    cloud.google.com/backend-config: '{"default": "ingest-backend"}'
+spec:
+  type: NodePort
+  selector:
+    app: ingest
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3001
+
+---
+
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: ingest-backend
+spec:
+  healthCheck: 
+    checkIntervalSec: 30
+    requestPath: /ingest/ping  # 🔹 Asegúrate de que este endpoint exista en Flask
+    type: HTTP
+    port: 3001
+
+---
+
+# Inventary-service _________________________________________________________________________________________________________________
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventary
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: inventary
+  template:
+    metadata:
+      labels:
+        app: inventary
+    spec:
+      containers:
+        - name: inventary
+          image: us-central1-docker.pkg.dev/devpros/devpros-exp/inventary-service:v5
+          ports:
+            - containerPort: 3002
+          resources:
+            requests:
+              cpu: "1500m"  # Reserva 1 CPU
+              memory: "1Gi"  # Reserva 1GB de RAM
+            limits:
+              cpu: "3000m"  # Puede usar hasta 2 CPUs
+              memory: "4Gi"  # Puede usar hasta 2GB de RAM
+          env:
+            - name: DB_USER
+              value: "admin-db"
+            - name: DB_PASSWORD
+              value: "admin123"
+            - name: DB_NAME
+              value: "dbinventary"
+            - name: DB_HOST
+              value: "10.217.240.3"
+            - name: DB_PORT
+              value: "5432"
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-service-deploy"
+            - name: RABBITMQ_USER
+              value: "admin"
+            - name: RABBITMQ_PASSWORD
+              value: "admin"
+            - name: QUEUE_NAME
+              value: "product_queue"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventary-deploy
+  annotations : 
+    cloud.google.com/backend-config: '{"default": "inventary-backend"}'
+spec:
+  type: NodePort
+  selector:
+    app: inventary
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3002
+
+---
+
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: inventary-backend
+spec:
+  healthCheck: 
+    checkIntervalSec: 30
+    requestPath: /inventary/ping  # 🔹 Asegúrate de que este endpoint exista en Flask
+    type: HTTP
+    port: 3002
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi  # Ajusta el tamaño del almacenamiento según tus necesidades
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3-management  # Incluye la UI web de RabbitMQ
+          ports:
+            - containerPort: 5672  # Puerto para la comunicación AMQP
+            - containerPort: 15672 # Puerto para la UI de administración
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              value: "admin"
+            - name: RABBITMQ_DEFAULT_PASS
+              value: "admin"
+          volumeMounts:
+            - mountPath: /var/lib/rabbitmq
+              name: rabbitmq-storage
+      volumes:
+        - name: rabbitmq-storage
+          persistentVolumeClaim:
+            claimName: rabbitmq-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-service-deploy
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      protocol: TCP
+      port: 5672  # AMQP for microservices
+      targetPort: 5672
+    - name: management
+      protocol: TCP
+      port: 15672  # UI for RabbitMQ
+      targetPort: 15672
+  type: ClusterIP  # Keep internal communication only
+
+
+---
+
+# INGRESS CONFIG  ________________________________________________________________________________
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: experimento-deployment1
+spec:
+  rules:
+  - http:
+      paths:
+      - pathType: Prefix
+        path: /ingest
+        backend:
+          service:
+            name: ingest-deploy
+            port:
+              number: 80
+      - pathType: Prefix
+        path: /inventary
+        backend:
+          service:
+            name: inventary-deploy
+            port:
+              number: 80
+      - pathType: Prefix
+        path: /inventary/metrics  # ⬆️ Agregamos acceso a métricas de Prometheus
+        backend:
+          service:
+            name: inventary-deploy
+            port:
+              number: 80
+      - pathType: Prefix
+        path: /rabbitmq
+        backend:
+          service:
+            name: rabbitmq-service-deploy
+            port:
+              number: 15672
+

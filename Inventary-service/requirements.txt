@@ -1,4 +1,5 @@
+flask
 pika
-psycopg2	
-prometheus-client
-python-dotenv
+psycopg2-binary
+prometheus_client
+python-json-logger
