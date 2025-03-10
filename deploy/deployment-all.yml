@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: ingest
-          image: us-central1-docker.pkg.dev/devpros/devpros-exp/ingest-service:v8
+          image: us-central1-docker.pkg.dev/devprosexp/repoexperimento/invest-service:v1
           ports:
             - containerPort: 3001
           resources:
@@ -69,12 +69,13 @@ spec:
 ---
 
 # Inventary-service _________________________________________________________________________________________________________________
+# Deployment de inventary optimizado para alto rendimiento
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: inventary
 spec:
-  replicas: 6
+  replicas: 2  # arranque con al menos 2 pods
   selector:
     matchLabels:
       app: inventary
@@ -85,25 +86,25 @@ spec:
     spec:
       containers:
         - name: inventary
-          image: us-central1-docker.pkg.dev/devpros/devpros-exp/inventary-service:v5
+          image: us-central1-docker.pkg.dev/devprosexp/repoexperimento/inventary-service:v1
           ports:
             - containerPort: 3002
           resources:
             requests:
-              cpu: "1500m"  # Reserva 1 CPU
-              memory: "1Gi"  # Reserva 1GB de RAM
+              cpu: "3000m"       # Reserva 3 CPUs por pod
+              memory: "3Gi"      # Reserva 3GB de RAM
             limits:
-              cpu: "3000m"  # Puede usar hasta 2 CPUs
-              memory: "4Gi"  # Puede usar hasta 2GB de RAM
+              cpu: "3000m"       # Puede usar hasta 6 CPUs si está disponible
+              memory: "3Gi"      # Hasta 6GB de RAM por pod
           env:
             - name: DB_USER
               value: "admin-db"
             - name: DB_PASSWORD
               value: "admin123"
             - name: DB_NAME
-              value: "dbinventary"
+              value: "inventary"
             - name: DB_HOST
-              value: "10.217.240.3"
+              value: "10.147.128.3"
             - name: DB_PORT
               value: "5432"
             - name: RABBITMQ_HOST
@@ -114,6 +115,13 @@ spec:
               value: "admin"
             - name: QUEUE_NAME
               value: "product_queue"
+            - name: NUM_THREADS
+              value: "15"
+            - name: MINCONN
+              value: "10"
+            - name: PAGE_SIZE
+              value: "1000"
+
 
 ---
 

@@ -23,7 +23,7 @@ logger.setLevel(logging.INFO)
 logger.addHandler(logHandler)
 
 app = Flask(__name__)
-NUM_THREADS = 4  
+NUM_THREADS = 15
 executor = ThreadPoolExecutor(max_workers=NUM_THREADS)
 
 first_record_time = None
@@ -32,7 +32,7 @@ lock = threading.Lock()
 
 # 🔹 Pool de conexiones a PostgreSQL
 DB_POOL = pool.SimpleConnectionPool(
-    minconn=1, 
+    minconn=10, 
     maxconn=NUM_THREADS * 2,  
     host=os.getenv('DB_HOST'),
     database=os.getenv('DB_NAME'),
@@ -84,7 +84,7 @@ def save_to_db(records):
         query = "INSERT INTO products (id, name, price, quantity) VALUES %s"
         values = [(str(uuid.uuid4()), rec["name"], rec["price"], rec["quantity"]) for rec in records]
 
-        psycopg2.extras.execute_values(cur, query, values)
+        psycopg2.extras.execute_values(cur, query, values,page_size=1000)
         conn.commit()
 
         # 🔹 Incrementar el contador de inserciones
@@ -159,7 +159,7 @@ def consume():
             channel = connection.channel()
             channel.queue_declare(queue=queue_name, durable=True)
 
-            channel.basic_qos(prefetch_count=NUM_THREADS * 2)
+            channel.basic_qos(prefetch_count=NUM_THREADS * 5)
             channel.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=False)
 
             logger.info({"message": "✅ Consumidor listo, esperando mensajes..."})
